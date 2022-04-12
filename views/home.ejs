@@ -1,14 +1,14 @@
 <%- include("partials/header.ejs") -%>
 
-<h1>Hello</h1>
-<p><%=startingContent%></p><br>
+<h1 class="homeHone">Hello</h1>
 
-<%posts.forEach(function(post){%>
-<h1><%=post.title%></h1>
-<p>
-  <%=post.content.substring(0,100)+"..."%>
-  <a href="/posts/<%=post.title%>">Read More</a>
-</p>
-<%});%>
+    <img src="/images/circleProfile.png" style="width:273.9px;height:292.2px;">
+    <p class="startCont"><%=startingContent%></p>
+<form class="" action="/projects" method="get">
+  <button type="submit" name="button">My Projects</button>
+
+</form>
+
+
 
 <%- include("partials/footer.ejs") -%>
