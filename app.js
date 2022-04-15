@@ -6,13 +6,18 @@ const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const _ = require("lodash");
 const mongoose = require("mongoose");
-const encrypt= require("mongoose-encryption");
+const session= require("express-session");
+const passport=require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const findOrCreate = require("mongoose-findorcreate");
+
+
 
 const homeStartingContent = "Welcome to my tech portfolio. This is where I will be taking you with me on my journey of becoming a better web-developer everyday. stay tuned and take a look around my website!";
-const aboutContent = "Hac habitasse platea dictumst vestibulum rhoncus est pellentesque. Dictumst vestibulum rhoncus est pellentesque elit ullamcorper. Non diam phasellus vestibulum lorem sed. Platea dictumst quisque sagittis purus sit. Egestas sed sed risus pretium quam vulputate dignissim suspendisse. Mauris in aliquam sem fringilla. Semper risus in hendrerit gravida rutrum quisque non tellus orci. Amet massa vitae tortor condimentum lacinia quis vel eros. Enim ut tellus elementum sagittis vitae. Mauris ultrices eros in cursus turpis massa tincidunt dui.";
+const aboutContent = "I am a highschool Math and Science teacher, currently teaching myself web-developement. Interested in learning more about both front and backend. I am dedicated, willing to learn new things always, and work well with feedback.";
 
-const contactContent = "Scelerisque eleifend donec pretium vulputate sapien. Rhoncus urna neque viverra justo nec ultrices. Arcu dui vivamus arcu felis bibendum. Consectetur adipiscing elit duis tristique. Risus viverra adipiscing at in tellus integer feugiat. Sapien nec sagittis aliquam malesuada bibendum arcu vitae. Consequat interdum varius sit amet mattis. Iaculis nunc sed augue lacus. Interdum posuere lorem ipsum dolor sit amet consectetur adipiscing elit. Pulvinar elementum integer enim neque. Ultrices gravida dictum fusce ut placerat orci nulla. Mauris in aliquam sem fringilla ut morbi tincidunt. Tortor posuere ac ut consequat semper viverra nam libero.";
-
+const contactContent = "To contact me about any inquries or opportunities, see socials, and email below!"
 const app = express();
 console.log(process.env.API_KEY);
 
@@ -23,24 +28,61 @@ app.set('view engine', 'ejs');
 app.use(bodyParser.urlencoded({extended: true}));
 app.use(express.static("public"));
 
+app.use(session({
+  secret:process.env.SECRET,
+  resave: false,
+  saveUninitialized: false
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
 //to use mongoose. out DB will be called userDB
-mongoose.connect("mongodb://127.0.0.1:27017/userDB",{useNewUrlParser: true});
+mongoose.connect("mongodb+srv://Admin-Esra:Yamen411628@cluster0.hmmtk.mongodb.net/userDB",{useNewUrlParser: true});
 //set up new user dB. create schema
 //pbject created from mongoose schema class.
 const userSchema = new mongoose.Schema({
   email: String,
-  password: String
+  password: String,
+  googleId: String,
+  secret: String
 });
+
+userSchema.plugin(passportLocalMongoose);
+userSchema.plugin(findOrCreate);
 //use convenient method to define a secret
 //add plugin onto Schema and pass in secret as js object
 //add plugin to schema before adding new mongoose model
 //this is because mongoose schema is one of the parameters to create new mongoose model (user)
-userSchema.plugin(encrypt,{secret:process.env.SECRET, encryptedFields:['password']});
 
 //use user schema to set up new user model. our collection called "User"
 const User = new mongoose.model("User", userSchema);
 //we can now start creating users and adding it to userDB. we create users when client goes to register page and type in their email and password.
+passport.use(User.createStrategy());
 
+passport.serializeUser(function(user,done){
+  done(null,user.id);
+});
+
+passport.deserializeUser(function(id, done){
+  User.findById(id, function(err, user){
+    done(err, user);
+  });
+});
+
+passport.use(new GoogleStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    console.log(profile);
+
+    User.findOrCreate({ googleId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
 
 
 app.get("/", function(req,res){
@@ -48,6 +90,16 @@ res.render("home", {
   startingContent: homeStartingContent,
   posts:posts
 });
+});
+
+app.get("/auth/google",
+ passport.authenticate("google",{scope:["profile"]}
+));
+
+app.get("/auth/google/secrets",
+passport.authenticate("google",{failureRedirect:"/login"}),
+function(req,res){
+  res.redirect("/secrets");
 });
 
 app.get("/posts", function(req,res){
@@ -87,40 +139,67 @@ app.get("/register", function(req,res){
 res.render("register");
 });
 
-app.post("/register", function(req,res){
-  const newUser = new User({
-    email: req.body.username,
-    password: req.body.password
-  });
-//mongoose will encrypt upon save
-newUser.save(function(err){
+app.get("/secrets", function(req, res){
+User.find({"secret": {$ne: null}}, function(err,foundUsers){
   if(err){
     console.log(err);
   }else{
-    res.render("secrets");
+    if(foundUsers){
+      res.render("secrets", {usersWithSecrets: foundUsers});
+    }
   }
 });
 });
 
-app.post("/login",function(req,res){
-  const username = req.body.username;
-  const password = req.body.password;
+app.get("/submit", function(req,res){
+  if(req.isAuthenticated()){
+    res.render("submit");
+  }else{
+    res.redirect("/login");
+  }
+});
 
-  //want to check those against our data base
-//look through collection of users
-//encryption decrypted here upon find
-  User.findOne({email: username}, function(err, foundUser){
-    if (err){
-      console.log(err);
-    }else{
-      if(foundUser){
-        if(foundUser.password===password){
-          res.render("secrets");
-        }
+app.post("/submit", function(req,res){
+  const submittedSecret=req.body.secret;
+  console.log(req.user.id);
+    User.findById(req.user.id, function(err,foundUser){
+            if(err){
+              console.log(err);
+            }else{
+            if(foundUser) {
+        foundUser.secret =submittedSecret;
+        foundUser.save(function(){
+          res.redirect("/secrets");
+        });
       }
     }
   });
 });
+
+app.get("/logout", function(req,res){
+  req.logout();
+  res.redirect("/login");
+});
+
+//add md5 to turn into an irreversible hash
+app.post("/register", function(req,res){
+User.register({username:req.body.username}, req.body.password, function(err, user){
+  if(err){
+    console.log(err);
+    res.redirect("/register");
+  }else{
+    passport.authenticate("local")(req, res, function(){
+      res.redirect("/secrets");
+    });
+  }
+});
+
+});
+
+app.post("/login", passport.authenticate('local',{
+  successRedirect:'/secrets',
+  failureRedirect:'/login'
+}));
 
 //for the security project
 
